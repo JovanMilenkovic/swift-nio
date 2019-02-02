@@ -106,7 +106,7 @@ private struct PendingStreamWritesState {
     public private(set) var bytes: Int64 = 0
 
     public var flushedChunks: Int {
-        return self.pendingWrites.markedElementIndex.map { $0 + 1 } ?? 0
+        return 0
     }
 
     /// Subtract `bytes` from the number of outstanding bytes to write.

@@ -25,6 +25,27 @@ protocol AppendableCollection: Collection {
 /// expansions from happening frequently. Expansions will always force an allocation and a copy to happen.
 public struct CircularBuffer<E>: CustomStringConvertible, AppendableCollection {
     public typealias RangeType<Bound> = Range<Bound> where Bound: Strideable, Bound.Stride: SignedInteger
+    
+    public struct Index: Comparable, Strideable {
+        let base: ContiguousArray<E?>.Index
+        
+        init(base: ContiguousArray<E?>.Index) {
+            self.base = base
+        }
+        
+        public static func < (lhs: Index, rhs: Index) -> Bool {
+            return lhs.base < rhs.base
+        }
+        
+        public func distance(to other: Index) -> Int {
+            return self.base.distance(to: other.base)
+        }
+        
+        public func advanced(by n: Int) -> Index {
+            return Index(base: self.base.advanced(by: n))
+        }
+    }
+    
     private var buffer: ContiguousArray<E?>
 
     /// The index into the buffer of the first item
@@ -101,57 +122,47 @@ public struct CircularBuffer<E>: CustomStringConvertible, AppendableCollection {
     /// Return element `index` of the ring.
     ///
     /// *O(1)*
-    public subscript(index: Int) -> E {
+    public subscript(index: Index) -> E {
         get {
-            return self.buffer[self.bufferIndex(ofIndex: index)]!
+            return self.buffer[self.bufferIndex(ofIndex: index.base)]!
         }
         set {
-            self.buffer[self.bufferIndex(ofIndex: index)] = newValue
+            self.buffer[self.bufferIndex(ofIndex: index.base)] = newValue
+        }
+    }
+    
+    public subscript(offset: Int) -> E {
+        get {
+            return self[self.index(self.startIndex, offsetBy: offset)]
+        }
+        set {
+            self[self.index(self.startIndex, offsetBy: offset)] = newValue
         }
     }
 
     /// Return all valid indices of the ring.
-    public var indices: RangeType<Int> {
-        return 0..<self.count
-    }
+    public var indices: RangeType<Index> { return self.startIndex ..< self.endIndex }
 
     /// Returns whether the ring is empty.
-    public var isEmpty: Bool {
-        return self.headIdx == self.tailIdx
-    }
+    public var isEmpty: Bool { return self.headIdx == self.tailIdx }
 
     /// Returns the number of element in the ring.
-    public var count: Int {
-        return (self.tailIdx - self.headIdx) & self.mask
-    }
+    public var count: Int { return (self.tailIdx - self.headIdx) & self.mask }
 
     /// The total number of elements that the ring can contain without allocating new storage.
-    public var capacity: Int {
-        return self.buffer.count
-    }
+    public var capacity: Int { return self.buffer.count }
 
     /// Returns the index of the first element of the ring.
-    public var startIndex: Int {
-        return 0
-    }
+    public var startIndex: Index { return Index(base: self.buffer.startIndex) }
 
     /// Returns the ring's "past the end" position -- that is, the position one greater than the last valid subscript argument.
-    public var endIndex: Int {
-        return self.count
-    }
+    public var endIndex: Index { return Index(base: self.count) }
 
     /// Returns the next index after `index`.
-    public func index(after: Int) -> Int {
-        let nextIndex = after + 1
-        precondition(nextIndex <= self.endIndex)
-        return nextIndex
-    }
+    public func index(after i: Index) -> Index { return Index(base: i.base + 1) }
 
     /// Returns the index before `index`.
-    public func index(before: Int) -> Int {
-        precondition(before > 0)
-        return before - 1
-    }
+    public func index(before i: Index) -> Index { return Index(base: i.base - 1) }
 
     /// Removes all members from the circular buffer whist keeping the capacity.
     public mutating func removeAll(keepingCapacity: Bool = false) {
@@ -198,8 +209,8 @@ extension CircularBuffer: BidirectionalCollection, RandomAccessCollection, Range
             // Can't just zip(subrange, newElements) because the compiler complains about:
             // «argument type 'Range<Int>' does not conform to expected type 'Sequence'»
             // with Swift version 4.1.2 (swiftlang-902.0.54 clang-902.0.39.2)
-            for (index, element) in zip(subrange.lowerBound..<subrange.upperBound, newElements) {
-                self.buffer[self.bufferIndex(ofIndex: index)] = element
+            for (index, element) in zip(subrange, newElements) {
+                self.buffer[self.bufferIndex(ofIndex: index.base)] = element
             }
         } else if subrange.count == self.count && newElements.isEmpty {
             self.removeSubrange(subrange)
@@ -212,7 +223,7 @@ extension CircularBuffer: BidirectionalCollection, RandomAccessCollection, Range
             // This mapping is required due to an inconsistent ability to append sequences of non-optional
             // to optional sequences.
             // https://bugs.swift.org/browse/SR-7921
-            newBuffer.append(contentsOf: self[0..<subrange.lowerBound].lazy.map { $0 })
+            newBuffer.append(contentsOf: self[Index(base: 0)..<subrange.lowerBound].lazy.map { $0 })
             newBuffer.append(contentsOf: newElements.lazy.map { $0 })
             newBuffer.append(contentsOf: self[subrange.upperBound..<self.endIndex].lazy.map { $0 })
 
@@ -229,7 +240,7 @@ extension CircularBuffer: BidirectionalCollection, RandomAccessCollection, Range
     /// Removes the elements in the specified subrange from the circular buffer.
     ///
     /// - Parameter bounds: The range of the circular buffer to be removed. The bounds of the range must be valid indices of the collection.
-    public mutating func removeSubrange(_ bounds: Range<Int>) {
+    public mutating func removeSubrange(_ bounds: Range<Index>) {
         precondition(bounds.upperBound >= self.startIndex && bounds.upperBound <= self.endIndex, "Invalid bounds.")
         switch bounds.count {
         case 1:
@@ -262,9 +273,9 @@ extension CircularBuffer: BidirectionalCollection, RandomAccessCollection, Range
     /// otherwise
     /// *O(n)* where *n* is the number of elements between `position` and `tailIdx`.
     @discardableResult
-    public mutating func remove(at position: Int) -> E {
+    public mutating func remove(at position: Index) -> E {
         precondition(self.indices.contains(position), "Position out of bounds.")
-        var bufferIndex = self.bufferIndex(ofIndex: position)
+        var bufferIndex = self.bufferIndex(ofIndex: position.base)
         let element = self.buffer[bufferIndex]!
 
         switch bufferIndex {

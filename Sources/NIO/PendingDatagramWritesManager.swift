@@ -295,10 +295,10 @@ private struct PendingDatagramWritesState {
     /// Returns the best mechanism to write pending data at the current point in time.
     var currentBestWriteMechanism: WriteMechanism {
         switch self.pendingWrites.markedElementIndex {
-        case .some(let e) where e > 0:
+        case .some(let e) where e > self.pendingWrites.startIndex:
             return .vectorBufferWrite
         case .some(let e):
-            assert(e == 0)  // The compiler can't prove this, but it must be so.
+            assert(e == self.pendingWrites.startIndex)  // The compiler can't prove this, but it must be so.
             return .scalarBufferWrite
         default:
             return .nothingToBeWritten
@@ -310,19 +310,20 @@ private struct PendingDatagramWritesState {
 extension PendingDatagramWritesState {
     struct FlushedDatagramWriteSequence: Sequence, IteratorProtocol {
         private let pendingWrites: PendingDatagramWritesState
-        private var index: Int
-        private let markedIndex: Int
+        private var index: MarkedCircularBuffer<Element>.Index
+        private let markedIndex: MarkedCircularBuffer<Element>.Index?
 
         init(_ pendingWrites: PendingDatagramWritesState) {
             self.pendingWrites = pendingWrites
             self.index = pendingWrites.pendingWrites.startIndex
-            self.markedIndex = pendingWrites.pendingWrites.markedElementIndex ?? -1
+            self.markedIndex = pendingWrites.pendingWrites.markedElementIndex
         }
 
         mutating func next() -> PendingDatagramWrite? {
-            while self.index <= self.markedIndex {
+            guard let markedIndex = self.markedIndex else { return nil }
+            while self.index <= markedIndex {
                 let element = self.pendingWrites.pendingWrites[index]
-                index += 1
+                index = index.advanced(by: 1)
                 return element
             }
 
