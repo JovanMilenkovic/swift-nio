@@ -154,28 +154,29 @@ class CircularBufferTests: XCTestCase {
     }
 
     func testCollection() {
-//        var ring = CircularBuffer<Int>(initialCapacity: 4)
-//        XCTAssertEqual(ring.indices, ring.range(0..<0))
-//        XCTAssertEqual(ring.startIndex, 0)
-//        XCTAssertEqual(ring.endIndex, 0)
-//
-//        for idx in 0..<5 {
-//            ring.append(idx)
-//        }
-//
-//        XCTAssertFalse(ring.isEmpty)
-//        XCTAssertEqual(5, ring.count)
-//
-//        XCTAssertEqual(ring.indices, ring.range(0..<5))
-//        XCTAssertEqual(ring.startIndex, 0)
-//        XCTAssertEqual(ring.endIndex, 5)
-//
-//        XCTAssertEqual(ring.index(after: 1), 2)
-//        XCTAssertEqual(ring.index(before: 3), 2)
-//
-//        let actualValues = [Int](ring)
-//        let expectedValues = [0, 1, 2, 3, 4]
-//        XCTAssertEqual(expectedValues, actualValues)
+        var ring = CircularBuffer<Int>(initialCapacity: 4)
+        XCTAssertEqual(ring.indices, ring.range(0..<0))
+        XCTAssertEqual(ring.startIndex, ring.headIdx)
+        XCTAssertEqual(ring.endIndex, ring.tailIdx)
+        XCTAssertEqual(ring.headIdx, ring.tailIdx)
+
+        for idx in 0..<5 {
+            ring.append(idx)
+        }
+
+        XCTAssertFalse(ring.isEmpty)
+        XCTAssertEqual(5, ring.count)
+
+        XCTAssertEqual(ring.indices, ring.range(0..<5))
+        XCTAssertEqual(ring.startIndex, ring.headIdx)
+        XCTAssertEqual(ring.endIndex, ring.headIdx.advanced(by: 5))
+
+        XCTAssertEqual(ring.index(after: ring.startIndex.advanced(by: 1)), ring.startIndex.advanced(by: 2))
+        XCTAssertEqual(ring.index(before: ring.endIndex.advanced(by: -3)), ring.endIndex.advanced(by: -4))
+
+        let actualValues = [Int](ring)
+        let expectedValues = [0, 1, 2, 3, 4]
+        XCTAssertEqual(expectedValues, actualValues)
     }
 
     func testReplaceSubrange5ElementsWith1() {
@@ -351,10 +352,10 @@ class CircularBufferTests: XCTestCase {
             ring.append(idx)
         }
 
-//        let slice = ring[25..<30]
-//        for (idx, element) in slice.enumerated() {
-//            XCTAssertEqual(idx + 25, element)
-//        }
+        let slice = ring[ring.range(25..<30)]
+        for (idx, element) in slice.enumerated() {
+            XCTAssertEqual(idx + 25, element)
+        }
     }
 
     func testCount() {
@@ -373,8 +374,8 @@ class CircularBufferTests: XCTestCase {
         XCTAssertEqual(3, ring.removeFirst())
         ring.append(5)
 
-        XCTAssertEqual(3, ring.headIdx)
-        XCTAssertEqual(1, ring.tailIdx)
+        XCTAssertEqual(3, ring.headIdx.base)
+        XCTAssertEqual(1, ring.tailIdx.base)
         XCTAssertEqual(2, ring.count)
         XCTAssertEqual(4, ring.removeFirst())
         XCTAssertEqual(5, ring.removeFirst())
