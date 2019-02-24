@@ -22,7 +22,7 @@ public struct MarkedCircularBuffer<Element>: CustomStringConvertible, Appendable
     public typealias Index = CircularBuffer<Element>.Index
 
     private var buffer: CircularBuffer<Element>
-    private var markedIndex: Index? = nil /* nil: nothing marked */
+    private var markedIndexOffset: Int? = nil /* nil: nothing marked */
 
     /// Create a new instance.
     ///
@@ -36,19 +36,15 @@ public struct MarkedCircularBuffer<Element>: CustomStringConvertible, Appendable
 
     /// Appends an entry to the buffer, expanding it if needed.
     public mutating func append(_ value: Element) {
+        if let markedIndexOffset = self.markedIndexOffset {
+            self.markedIndexOffset = markedIndexOffset + 1
+        }
         self.buffer.append(value)
     }
 
     /// Removes the first element from the buffer.
     public mutating func removeFirst() -> Element {
         assert(self.buffer.count > 0)
-        if let markedIndex = self.markedIndex {
-            if markedIndex == self.startIndex {
-                self.markedIndex = nil
-            } else {
-                self.markedIndex = markedIndex.advanced(by: -1)
-            }
-        }
         return self.buffer.removeFirst()
     }
 
@@ -100,9 +96,9 @@ public struct MarkedCircularBuffer<Element>: CustomStringConvertible, Appendable
     public mutating func mark() {
         let count = self.buffer.count
         if count > 0 {
-            self.markedIndex = self.endIndex.advanced(by: -1)
+            self.markedIndexOffset = 1
         } else {
-            assert(self.markedIndex == nil, "marked index is \(self.markedIndex.debugDescription)")
+            assert(self.markedElementIndex == nil, "marked index is \(self.markedElementIndex.debugDescription)")
         }
     }
 
@@ -110,12 +106,17 @@ public struct MarkedCircularBuffer<Element>: CustomStringConvertible, Appendable
     public func isMarked(index: Index) -> Bool {
         assert(index >= self.startIndex, "index must not be negative")
         precondition(index < self.endIndex, "index \(index) out of range (0..<\(self.buffer.count))")
-        return self.markedIndex == index
+        return self.markedElementIndex == index
     }
 
     /// Returns the index of the marked element.
     public var markedElementIndex: Index? {
-        return self.markedIndex
+        if let markedIndexOffset = markedIndexOffset {
+            let potentialIndex = self.buffer.index(self.endIndex, offsetBy: -markedIndexOffset)
+            return self.buffer.indices.contains(potentialIndex) ? potentialIndex : nil
+        } else {
+            return nil
+        }
     }
 
     /// Returns the marked element.
@@ -125,6 +126,6 @@ public struct MarkedCircularBuffer<Element>: CustomStringConvertible, Appendable
 
     /// Returns true if the buffer has been marked at all.
     public var hasMark: Bool {
-        return self.markedIndex != nil
+        return self.markedElementIndex != nil
     }
 }

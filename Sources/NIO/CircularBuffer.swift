@@ -28,61 +28,69 @@ public struct CircularBuffer<Element>: CustomStringConvertible, AppendableCollec
     private var buffer: ContiguousArray<Element?>
 
     /// The index into the buffer of the first item
-    private(set) /* private but tests */ internal var headIdx = 0
+    private(set) /* private but tests */ internal var headIdx: Index
 
     /// The index into the buffer of the next free slot
-    private(set) /* private but tests */ internal var tailIdx = 0
+    private(set) /* private but tests */ internal var tailIdx: Index
 
     public struct Index: Strideable, Comparable {
-        @usableFromInline
-        var _value: Int
-
-        public typealias Stride = Int
+        @usableFromInline var _value: ContiguousArray<Element?>.Index
+        @usableFromInline var _headValue: ContiguousArray<Element?>.Index
+        @usableFromInline let underlyingCount: Int
+        @usableFromInline var mask: Int { return self.underlyingCount - 1 }
 
         @inlinable
-        internal init(_value: Int) {
-            self._value = _value
+        internal init(value: ContiguousArray<Element?>.Index, headValue: ContiguousArray<Element?>.Index, underlyingCount: Int) {
+            self._headValue = headValue
+            self.underlyingCount = underlyingCount
+            self._value = (headValue + value) & (underlyingCount - 1)
         }
 
         @inlinable
         public func distance(to other: Index) -> Int {
-            return self._value.distance(to: other._value)
+            let head = self._headValue
+            if self._value >= head && other._value >= head {
+                return self._value.distance(to: other._value)
+            } else if self._value >= head && other._value <= head {
+                return self._value.distance(to: underlyingCount) + other._value
+            } else if self._value <= head && other._value >= head {
+                return self._value.distance(to: 0) + underlyingCount.distance(to: other._value)
+            } else {
+                return self._value.distance(to: other._value)
+            }
         }
 
         @inlinable
         public func advanced(by n: Int) -> Index {
-            return Index(_value: self._value + n)
+            var index = Index(value: 0, headValue: self._headValue, underlyingCount: self.underlyingCount)
+            index._value = (self._value + n) & (self.mask)
+            return index
         }
 
         @inlinable
         public static func < (lhs: Index, rhs: Index) -> Bool {
-            return lhs._value < rhs._value
-        }
-
-        @inlinable
-        public static func <= (lhs: Index, rhs: Index) -> Bool {
-            return lhs._value <= rhs._value
-        }
-
-        @inlinable
-        public static func == (lhs: Index, rhs: Index) -> Bool {
-            return lhs._value == rhs._value
+            let head = lhs._headValue
+            if lhs._value >= head && rhs._value >= head {
+                return lhs._value < rhs._value
+            } else if lhs._value >= head && rhs._value <= head {
+                return true
+            } else if lhs._value <= head && rhs._value >= head {
+                return false
+            } else {
+                return lhs._value < rhs._value
+            }
         }
     }
 }
 
 extension CircularBuffer {
-    /// Bitmask used for calculating the tailIdx / headIdx based on the fact that the underlying storage
-    /// has always a size of power of two.
-    private var mask: Int {
-        return self.buffer.count - 1
-    }
-
     /// Allocates a buffer that can hold up to `initialCapacity` elements and initialise an empty ring backed by
     /// the buffer. When the ring grows to more than `initialCapacity` elements the buffer will be expanded.
     public init(initialCapacity: Int) {
         let capacity = Int(UInt32(initialCapacity).nextPowerOf2())
         self.buffer = ContiguousArray<Element?>(repeating: nil, count: capacity)
+        self.headIdx = Index(value: 0, headValue: 0, underlyingCount: capacity)
+        self.tailIdx = Index(value: 0, headValue: 0, underlyingCount: capacity)
         assert(self.buffer.count == capacity)
     }
 
@@ -95,8 +103,8 @@ extension CircularBuffer {
     ///
     /// Amortized *O(1)*
     public mutating func append(_ value: Element) {
-        self.buffer[self.tailIdx] = value
-        self.tailIdx = (self.tailIdx + 1) & self.mask
+        self.buffer[self.tailIdx._value] = value
+        self.tailIdx = self.index(after: self.tailIdx)
 
         if self.headIdx == self.tailIdx {
             // No more room left for another append so grow the buffer now.
@@ -108,9 +116,11 @@ extension CircularBuffer {
     ///
     /// Amortized *O(1)*
     public mutating func prepend(_ value: Element) {
-        let idx = (self.headIdx - 1) & mask
-        self.buffer[idx] = value
-        self.headIdx = idx
+        let idx = self.index(before: self.headIdx)
+        self.buffer[idx._value] = value
+        self.headIdx._value = idx._value
+        self.headIdx._headValue = self.headIdx._value
+        self.tailIdx._headValue = self.headIdx._value
 
         if self.headIdx == self.tailIdx {
             // No more room left for another append so grow the buffer now.
@@ -126,14 +136,27 @@ extension CircularBuffer {
         assert(newCapacity % 2 == 0)
 
         newBacking.reserveCapacity(newCapacity)
-        newBacking.append(contentsOf: self.buffer[self.headIdx..<self.buffer.count])
-        if self.headIdx > 0 {
-            newBacking.append(contentsOf: self.buffer[0..<self.headIdx])
+        newBacking.append(contentsOf: self.buffer[self.headIdx._value..<self.buffer.count])
+        if self.headIdx._value > 0 {
+            newBacking.append(contentsOf: self.buffer[0..<self.headIdx._value])
         }
-        newBacking.append(contentsOf: repeatElement(nil, count: newCapacity - newBacking.count))
-        self.tailIdx = self.buffer.count
-        self.headIdx = 0
+        let repeatitionCount = newCapacity - newBacking.count
+        newBacking.append(contentsOf: repeatElement(nil, count: repeatitionCount))
+        self.headIdx = Index(value: 0, headValue: 0, underlyingCount: newBacking.count)
+        self.tailIdx = Index(value: newBacking.count - repeatitionCount, headValue: self.headIdx._value, underlyingCount: newBacking.count)
         self.buffer = newBacking
+    }
+    
+    /// Return element `offset` from first element.
+    ///
+    /// *O(1)*
+    public subscript(offset: Int) -> Element {
+        get {
+            return self[self.index(self.startIndex, offsetBy: offset)]
+        }
+        set {
+            self[self.index(self.startIndex, offsetBy: offset)] = newValue
+        }
     }
 
     // MARK: Collection implementation
@@ -142,13 +165,13 @@ extension CircularBuffer {
     /// *O(1)*
     public subscript(index: Index) -> Element {
         get {
-            return self.buffer[self.bufferIndex(ofIndex: index)]!
+            return self.buffer[index._value]!
         }
         set {
-            self.buffer[self.bufferIndex(ofIndex: index)] = newValue
+            self.buffer[index._value] = newValue
         }
     }
-
+    
     /// Return all valid indices of the ring.
     public var indices: RangeType<Index> {
         return self.startIndex ..< self.endIndex
@@ -161,7 +184,7 @@ extension CircularBuffer {
 
     /// Returns the number of element in the ring.
     public var count: Int {
-        return (self.tailIdx - self.headIdx) & self.mask
+        return self.headIdx.distance(to: self.tailIdx)
     }
 
     /// The total number of elements that the ring can contain without allocating new storage.
@@ -171,50 +194,52 @@ extension CircularBuffer {
 
     /// Returns the index of the first element of the ring.
     public var startIndex: Index {
-        return Index(_value: 0)
+        return self.headIdx
     }
 
     /// Returns the ring's "past the end" position -- that is, the position one greater than the last valid subscript argument.
     public var endIndex: Index {
-        return Index(_value: self.count)
+        return self.tailIdx
     }
 
     /// Returns the next index after `index`.
     public func index(after: Index) -> Index {
-        let nextIndex = after.advanced(by: 1)
-        precondition(nextIndex <= self.endIndex)
-        return nextIndex
+        return after.advanced(by: 1)
     }
 
     /// Returns the index before `index`.
     public func index(before: Index) -> Index {
-        precondition(before._value > 0)
         return before.advanced(by: -1)
     }
 
+    /// Returns the index offset by `distance` from `index`.
+    public func index(_ i: Index, offsetBy distance: Int) -> Index {
+        return i.advanced(by: distance)
+    }
+    
     /// Removes all members from the circular buffer whist keeping the capacity.
     public mutating func removeAll(keepingCapacity: Bool = false) {
         if keepingCapacity {
-            for index in 0..<self.count {
-                self.buffer[self.bufferIndex(ofIndex: Index(_value: index))] = nil
+            for index in self.startIndex..<self.endIndex {
+                self.buffer[index._value] = nil
             }
         } else {
             self.buffer.removeAll(keepingCapacity: false)
             self.buffer.append(nil)
         }
-        self.headIdx = 0
-        self.tailIdx = 0
+        self.headIdx = Index(value: 0, headValue: 0, underlyingCount: self.buffer.count)
+        self.tailIdx = Index(value: 0, headValue: 0, underlyingCount: self.buffer.count)
         assert(self.buffer.allSatisfy { $0 == nil})
     }
-
+    
     // MARK: CustomStringConvertible implementation
     /// Returns a human readable description of the ring.
     public var description: String {
         var desc = "[ "
         for el in self.buffer.enumerated() {
-            if el.0 == self.headIdx {
+            if el.0 == self.headIdx._value {
                 desc += "<"
-            } else if el.0 == self.tailIdx {
+            } else if el.0 == self.tailIdx._value {
                 desc += ">"
             }
             desc += el.1.map { "\($0) " } ?? "_ "
@@ -242,11 +267,8 @@ extension CircularBuffer: BidirectionalCollection, RandomAccessCollection, Range
         precondition(subrange.lowerBound >= self.startIndex && subrange.upperBound <= self.endIndex, "Subrange out of bounds")
 
         if subrange.count == newElements.count {
-            // Can't just zip(subrange, newElements) because the compiler complains about:
-            // «argument type 'Range<Int>' does not conform to expected type 'Sequence'»
-            // with Swift version 4.1.2 (swiftlang-902.0.54 clang-902.0.39.2)
-            for (index, element) in zip(subrange.lowerBound..<subrange.upperBound, newElements) {
-                self.buffer[self.bufferIndex(ofIndex: index)] = element
+            for (index, element) in zip(subrange, newElements) {
+                self.buffer[index._value] = element
             }
         } else if subrange.count == self.count && newElements.isEmpty {
             self.removeSubrange(subrange)
@@ -263,13 +285,13 @@ extension CircularBuffer: BidirectionalCollection, RandomAccessCollection, Range
             newBuffer.append(contentsOf: newElements.lazy.map { $0 })
             newBuffer.append(contentsOf: self[subrange.upperBound..<self.endIndex].lazy.map { $0 })
 
-            self.tailIdx = newBuffer.count
             let repetitionCount = newCapacity - newBuffer.count
             if repetitionCount > 0 {
                 newBuffer.append(contentsOf: repeatElement(nil, count: repetitionCount))
             }
-            self.headIdx = 0
             self.buffer = newBuffer
+            self.headIdx = Index(value: 0, headValue: 0, underlyingCount: newBuffer.count)
+            self.tailIdx = Index(value: newBuffer.count - repetitionCount, headValue: self.headIdx._value, underlyingCount: newBuffer.count)
         }
     }
 
@@ -295,10 +317,10 @@ extension CircularBuffer: BidirectionalCollection, RandomAccessCollection, Range
         precondition(n <= self.count, "Number of elements to drop bigger than the amount of elements in the buffer.")
         var idx = self.tailIdx
         for _ in 0 ..< n {
-            self.buffer[idx] = nil
-            idx = self.bufferIndex(before: Index(_value: idx))
+            self.buffer[idx._value] = nil
+            idx = self.index(before: idx)
         }
-        self.tailIdx = (self.tailIdx - n) & self.mask
+        self.tailIdx = self.tailIdx.advanced(by: -n)
     }
 
     /// Removes & returns the item at `position` from the buffer
@@ -311,46 +333,29 @@ extension CircularBuffer: BidirectionalCollection, RandomAccessCollection, Range
     @discardableResult
     public mutating func remove(at position: Index) -> Element {
         precondition(self.indices.contains(position), "Position out of bounds.")
-        var bufferIndex = self.bufferIndex(ofIndex: position)
-        let element = self.buffer[bufferIndex]!
+        var bufferIndex = position
+        let element = self.buffer[bufferIndex._value]!
 
         switch bufferIndex {
         case self.headIdx:
-            self.headIdx = self.bufferIndex(after: Index(_value: self.headIdx))
-            self.buffer[bufferIndex] = nil
-        case self.tailIdx - 1:
-            self.tailIdx = self.bufferIndex(before: Index(_value: self.tailIdx))
-            self.buffer[bufferIndex] = nil
+            self.headIdx = self.headIdx.advanced(by: 1)
+            self.headIdx._headValue = self.headIdx._value
+            self.tailIdx._headValue = self.headIdx._value
+            self.buffer[bufferIndex._value] = nil
+        case self.index(before: self.tailIdx):
+            self.tailIdx = self.index(before: self.tailIdx)
+            self.buffer[bufferIndex._value] = nil
         default:
-            var nextIndex = self.bufferIndex(after: Index(_value: bufferIndex))
+            var nextIndex = self.index(after: bufferIndex)
             while nextIndex != self.tailIdx {
-                self.buffer[bufferIndex] = self.buffer[nextIndex]
+                self.buffer[bufferIndex._value] = self.buffer[nextIndex._value]
                 bufferIndex = nextIndex
-                nextIndex = self.bufferIndex(after: Index(_value: bufferIndex))
+                nextIndex = self.index(after: bufferIndex)
             }
-            self.buffer[nextIndex] = nil
-            self.tailIdx = self.bufferIndex(before: Index(_value: self.tailIdx))
+            self.buffer[nextIndex._value] = nil
+            self.tailIdx = self.index(before: self.tailIdx)
         }
 
         return element
-    }
-}
-
-// MARK: - Private functions
-
-private extension CircularBuffer {
-    func bufferIndex(ofIndex index: Index) -> Int {
-        precondition(index._value < self.count, "index out of range")
-        return (self.headIdx + index._value) & self.mask
-    }
-
-    /// Returns the internal buffer next index after `index`.
-    func bufferIndex(after: Index) -> Int {
-        return (after._value + 1) & self.mask
-    }
-
-    /// Returns the internal buffer index before `index`.
-    func bufferIndex(before: Index) -> Int {
-        return (before._value - 1) & self.mask
     }
 }

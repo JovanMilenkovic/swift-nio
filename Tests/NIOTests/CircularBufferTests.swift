@@ -373,8 +373,8 @@ class CircularBufferTests: XCTestCase {
         XCTAssertEqual(3, ring.removeFirst())
         ring.append(5)
 
-        XCTAssertEqual(3, ring.headIdx)
-        XCTAssertEqual(1, ring.tailIdx)
+        XCTAssertEqual(3, ring.headIdx._value)
+        XCTAssertEqual(1, ring.tailIdx._value)
         XCTAssertEqual(2, ring.count)
         XCTAssertEqual(4, ring.removeFirst())
         XCTAssertEqual(5, ring.removeFirst())
@@ -454,7 +454,6 @@ class CircularBufferTests: XCTestCase {
         XCTAssertEqual(0, ring.count)
         XCTAssertTrue(ring.isEmpty)
     }
-
 
     func testPrependExpandBuffer() {
         var ring = CircularBuffer<Int>(initialCapacity: 3)
@@ -637,5 +636,19 @@ class CircularBufferTests: XCTestCase {
         assert(dummy6 == nil, within: .seconds(1))
         assert(dummy7 == nil, within: .seconds(1))
         assert(dummy8 == nil, within: .seconds(1))
+    }
+    
+    func testIntIndexing() {
+        var ring = CircularBuffer<Int>()
+        for i in 0 ..< 5 {
+            ring.append(i)
+            XCTAssertEqual(ring[i], i)
+        }
+        
+        XCTAssertEqual(ring[ring.startIndex], ring[0])
+        XCTAssertEqual(ring[ring.index(before: ring.endIndex)], ring[4])
+        
+        ring[1] = 10
+        XCTAssertEqual(ring[ring.index(after: ring.startIndex)], 10)
     }
 }
