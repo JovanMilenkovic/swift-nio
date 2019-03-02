@@ -373,8 +373,8 @@ class CircularBufferTests: XCTestCase {
         XCTAssertEqual(3, ring.removeFirst())
         ring.append(5)
 
-        XCTAssertEqual(3, ring.headIdx._value)
-        XCTAssertEqual(1, ring.tailIdx._value)
+        XCTAssertEqual(3, ring.headIdx.backingIndex)
+        XCTAssertEqual(1, ring.tailIdx.backingIndex)
         XCTAssertEqual(2, ring.count)
         XCTAssertEqual(4, ring.removeFirst())
         XCTAssertEqual(5, ring.removeFirst())
@@ -642,13 +642,13 @@ class CircularBufferTests: XCTestCase {
         var ring = CircularBuffer<Int>()
         for i in 0 ..< 5 {
             ring.append(i)
-            XCTAssertEqual(ring[i], i)
+            XCTAssertEqual(ring[offset: i], i)
         }
         
-        XCTAssertEqual(ring[ring.startIndex], ring[0])
-        XCTAssertEqual(ring[ring.index(before: ring.endIndex)], ring[4])
+        XCTAssertEqual(ring[ring.startIndex], ring[offset :0])
+        XCTAssertEqual(ring[ring.index(before: ring.endIndex)], ring[offset: 4])
         
-        ring[1] = 10
+        ring[offset: 1] = 10
         XCTAssertEqual(ring[ring.index(after: ring.startIndex)], 10)
     }
 }
